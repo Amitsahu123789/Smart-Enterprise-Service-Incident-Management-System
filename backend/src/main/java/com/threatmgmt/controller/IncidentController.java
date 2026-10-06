@@ -1,0 +1,152 @@
+package com.threatmgmt.controller;
+
+import com.threatmgmt.dto.AnalyticsStatsResponse;
+import com.threatmgmt.dto.IncidentPageResponse;
+import com.threatmgmt.model.Incident;
+import com.threatmgmt.model.IncidentSearchDoc;
+import com.threatmgmt.service.IncidentService;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+import java.util.Map;
+
+@RestController
+@RequestMapping("/api/v1/incidents")
+@RequiredArgsConstructor
+public class IncidentController {
+
+    private final IncidentService incidentService;
+
+    @PostMapping
+    @PreAuthorize("hasRole('ANALYST') or hasRole('ADMIN')")
+    public ResponseEntity<Incident> create(
+            @Valid @RequestBody Incident incident,
+            Authentication authentication) {
+        incident.setReportedBy(authentication.getName());
+        return ResponseEntity.status(201).body(incidentService.createIncident(incident));
+    }
+
+    @GetMapping
+    public ResponseEntity<List<Incident>> getAll(Authentication authentication) {
+        return ResponseEntity.ok(incidentService.getAll(authentication.getName(), isPrivileged(authentication)));
+    }
+
+    @GetMapping("/page")
+    public ResponseEntity<IncidentPageResponse> getPage(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) String severity,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String category,
+            @RequestParam(required = false) String priority,
+            @RequestParam(required = false) String assignedTo,
+            @RequestParam(required = false) String reportedBy,
+            @RequestParam(defaultValue = "createdAt") String sortBy,
+            @RequestParam(defaultValue = "desc") String direction,
+            Authentication authentication) {
+        boolean privileged = isPrivileged(authentication);
+        Page<Incident> incidents = incidentService.getPage(
+                authentication.getName(), privileged, page, size, q, severity, status,
+                category, priority, assignedTo, reportedBy, sortBy, direction);
+        return ResponseEntity.ok(new IncidentPageResponse(
+                incidents.getContent(), incidents.getNumber(), incidents.getSize(),
+                incidents.getTotalElements(), incidents.getTotalPages(), incidents.isFirst(),
+                incidents.isLast(), incidents.getSort().toString()));
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<Incident> getById(@PathVariable String id, Authentication authentication) {
+        return ResponseEntity.ok(incidentService.findById(id, authentication.getName(), isPrivileged(authentication)));
+    }
+
+    @GetMapping("/{id}/related")
+    public ResponseEntity<List<Incident>> getRelated(@PathVariable String id, Authentication authentication) {
+        return ResponseEntity.ok(incidentService.getRelatedIncidents(id, authentication.getName(), isPrivileged(authentication)));
+    }
+
+    @GetMapping("/search")
+    public ResponseEntity<List<IncidentSearchDoc>> search(@RequestParam String q, Authentication authentication) {
+        return ResponseEntity.ok(incidentService.searchIncidents(q, authentication.getName(), isPrivileged(authentication)));
+    }
+
+    @GetMapping("/severity/{severity}")
+    public ResponseEntity<List<Incident>> getBySeverity(@PathVariable String severity, Authentication authentication) {
+        return ResponseEntity.ok(incidentService.findBySeverity(severity.toUpperCase(), authentication.getName(), isPrivileged(authentication)));
+    }
+
+    @GetMapping("/status/{status}")
+    public ResponseEntity<List<Incident>> getByStatus(@PathVariable String status, Authentication authentication) {
+        return ResponseEntity.ok(incidentService.findByStatus(status.toUpperCase(), authentication.getName(), isPrivileged(authentication)));
+    }
+
+    @GetMapping("/stats")
+    public ResponseEntity<Map<String, Object>> getStats(Authentication authentication) {
+        return ResponseEntity.ok(incidentService.getStats(authentication.getName(), isPrivileged(authentication)));
+    }
+
+    @GetMapping("/analytics")
+    public ResponseEntity<AnalyticsStatsResponse> getAnalytics(Authentication authentication) {
+        return ResponseEntity.ok(incidentService.getAnalytics(
+                authentication.getName(), isPrivileged(authentication)));
+    }
+
+    private boolean isPrivileged(Authentication authentication) {
+        return authentication.getAuthorities().stream()
+                .anyMatch(authority -> authority.getAuthority().equals("ROLE_ADMIN")
+                        || authority.getAuthority().equals("ROLE_SUPER_ADMIN"));
+    }
+
+    @PutMapping("/{id}")
+    @PreAuthorize("(hasRole('ANALYST') or hasRole('ADMIN')) and hasPermission(#id, 'incident', 'write')")
+    public ResponseEntity<Incident> update(
+            @PathVariable String id,
+            @Valid @RequestBody Incident incident,
+            Authentication authentication) {
+        return ResponseEntity.ok(incidentService.updateIncident(id, incident, authentication.getName()));
+    }
+
+    @PatchMapping("/{id}/status")
+    @PreAuthorize("(hasRole('ANALYST') or hasRole('ADMIN') or hasRole('SUPER_ADMIN')) and hasPermission(#id, 'incident', 'status_update')")
+    public ResponseEntity<Incident> updateStatus(
+            @PathVariable String id,
+            @RequestParam String status,
+            Authentication authentication) {
+        return ResponseEntity.ok(incidentService.updateStatus(id, status, authentication.getName()));
+    }
+
+    @PatchMapping("/{id}/assign")
+    @PreAuthorize("(hasRole('ANALYST') or hasRole('ADMIN')) and hasPermission(#id, 'incident', 'write')")
+    public ResponseEntity<Incident> assignAnalyst(
+            @PathVariable String id,
+            @RequestBody Map<String, String> payload,
+            Authentication authentication) {
+        String analystUsername = payload.get("analystUsername");
+        String analystName = payload.get("analystName");
+        return ResponseEntity.ok(incidentService.assignAnalyst(id, analystUsername, analystName, authentication.getName()));
+    }
+
+    @PatchMapping("/{id}/checklist/{itemId}/toggle")
+    @PreAuthorize("hasRole('ANALYST') or hasRole('ADMIN') or hasRole('SUPER_ADMIN')")
+    public ResponseEntity<Incident> toggleChecklist(
+            @PathVariable String id,
+            @PathVariable String itemId,
+            Authentication authentication) {
+        return ResponseEntity.ok(incidentService.toggleChecklistItem(id, itemId, authentication.getName()));
+    }
+
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Void> delete(
+            @PathVariable String id,
+            Authentication authentication) {
+        incidentService.delete(id, authentication.getName());
+        return ResponseEntity.noContent().build();
+    }
+}

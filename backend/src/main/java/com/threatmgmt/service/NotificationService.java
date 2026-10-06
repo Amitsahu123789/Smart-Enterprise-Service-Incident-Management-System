@@ -1,0 +1,56 @@
+package com.threatmgmt.service;
+
+import com.threatmgmt.exception.ResourceNotFoundException;
+import com.threatmgmt.model.Notification;
+import com.threatmgmt.repository.NotificationRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+
+import java.time.LocalDateTime;
+import java.util.List;
+
+@Service
+@RequiredArgsConstructor
+public class NotificationService {
+
+    private final NotificationRepository notificationRepository;
+
+    public Notification createNotification(String recipientUsername, String title, String message, String type, String incidentId) {
+        Notification notification = Notification.builder()
+                .recipientUsername(recipientUsername)
+                .title(title)
+                .message(message)
+                .type(type)
+                .incidentId(incidentId)
+                .read(false)
+                .createdAt(LocalDateTime.now())
+                .build();
+        return notificationRepository.save(notification);
+    }
+
+    public Notification sendNotification(String recipientUsername, String type, String title, String message, String incidentId) {
+        return createNotification(recipientUsername, title, message, type, incidentId);
+    }
+
+    public List<Notification> getUserNotifications(String username) {
+        return notificationRepository.findByRecipientUsernameOrderByCreatedAtDesc(username);
+    }
+
+    public long getUnreadCount(String username) {
+        return notificationRepository.countByRecipientUsernameAndReadFalse(username);
+    }
+
+    public void markAsRead(String notificationId, String requestingUsername) {
+        Notification notification = notificationRepository.findById(notificationId)
+                .orElseThrow(() -> new ResourceNotFoundException("Notification", "id", notificationId));
+        if (!requestingUsername.equals(notification.getRecipientUsername())) {
+            throw new org.springframework.security.access.AccessDeniedException("Notification does not belong to the authenticated user");
+        }
+        notification.setRead(true);
+        notificationRepository.save(notification);
+    }
+
+    public void markAllAsRead(String username) {
+        notificationRepository.updateAllNotificationsAsReadByUsername(username);
+    }
+}
